@@ -2,7 +2,17 @@
 // Author: Gorstak
 // Modified to block URLs containing "xss" and updated blacklist
 // YouTube Ad Blocking: Blocks ad requests but may not instantly skip ads
-// (PAC files can't inject JavaScript - YouTube will timeout and skip after blocking)
+// 
+// IMPORTANT LIMITATIONS:
+// PAC files can only block HTTP requests based on URL patterns.
+// They CANNOT:
+// - Read POST request bodies (where ad requests often live)
+// - Modify HTTP responses (where ad data is embedded in JSON)
+// - Inject JavaScript to skip ad timers
+//
+// YouTube ads embedded in Player API JSON responses will still show.
+// For 100% ad blocking, combine this PAC file with a browser extension
+// like uBlock Origin that can modify JavaScript and responses.
 
 // Configuration Variables
 var normal = "DIRECT";              // Default pass-through for non-blocked traffic
@@ -414,11 +424,24 @@ function FindProxyForURL(url, host) {
                 if (debug) alert("Blocked YouTube API ad endpoint: " + url);
                 return blackhole;
             }
+            
+            // Additional aggressive check: Block player API if URL contains patterns that suggest ads
+            // Even though we can't see POST body, we can block based on URL patterns
+            var suspiciousAdPatterns = ["break", "atr", "ad_", "advertising", "adbreak"];
+            var urlLower = url.toLowerCase();
+            for (var sap = 0; sap < suspiciousAdPatterns.length; sap++) {
+                if (urlLower.indexOf(suspiciousAdPatterns[sap]) !== -1 && 
+                    (url.indexOf("/youtubei/v1/player") !== -1 || url.indexOf("/innertube") !== -1)) {
+                    if (debug) alert("Blocked suspicious YouTube API pattern: " + url);
+                    return blackhole;
+                }
+            }
+            
             // For player API on www.youtube.com, check if it's likely an ad request
             // (This is tricky because we can't see POST body, but we can check patterns)
             if (host.indexOf("www.youtube.com") !== -1 && url.indexOf("/youtubei/v1/player") !== -1) {
                 // Allow it through - regular player API calls are needed
-                // The blocking of ad responses will happen via other checks
+                // Note: Some ads embedded in responses will still get through (PAC file limitation)
                 return normal;
             }
             // Allow regular player API calls through
