@@ -4,7 +4,7 @@
 
 // Configuration Variables
 var normal = "DIRECT";              // Default pass-through for non-blocked traffic
-var blackhole = "PROXY 127.0.0.1:3421"; // Blackhole proxy for blocked traffic
+var blackhole = "PROXY 127.0.0.1:0"; // Blackhole proxy for blocked traffic (non-existent proxy)
 var isEnabled = 1;                  // Toggle for enabling/disabling ad-blocking (1 = enabled)
 var debug = 0;                      // Debugging flag (1 = enabled)
 
@@ -224,6 +224,76 @@ function FindProxyForURL(url, host) {
             if (debug) alert("Whitelisted: " + host);
             return normal;
         }
+    }
+
+    // ===== YouTube Ad Blocking Logic =====
+    // Check YouTube ad domains - route to blackhole (non-existent proxy)
+    if (shExpMatch(host, "*googlevideo.com") ||
+        shExpMatch(host, "*googlesyndication.com") ||
+        shExpMatch(host, "*doubleclick.net") ||
+        shExpMatch(host, "*googleadservices.com") ||
+        shExpMatch(host, "*adservice.google.*") ||
+        shExpMatch(host, "*ads.youtube.com") ||
+        shExpMatch(host, "*video-stats.l.google.com") ||
+        shExpMatch(host, "s.youtube.com") ||
+        shExpMatch(host, "*.ad.*.googlevideo.com") ||
+        shExpMatch(host, "*.ads.*.googlevideo.com")) {
+        
+        // Check if this is actually a YouTube video (not an ad)
+        // Regular YouTube videos from googlevideo.com should be allowed
+        var isVideoPlayback = url.indexOf("/videoplayback") !== -1;
+        var hasAdParams = false;
+        
+        if (isVideoPlayback) {
+            // Check for ad-related parameters in video URLs
+            var adParams = ["&oad=", "&ctier=", "&of=", "adformat", "ad_type", "ad_break", "&ad="];
+            for (var yt = 0; yt < adParams.length; yt++) {
+                if (url.indexOf(adParams[yt]) !== -1) {
+                    hasAdParams = true;
+                    break;
+                }
+            }
+            // Block if it has ad params, otherwise allow (it's a regular video)
+            if (hasAdParams) {
+                if (debug) alert("Blocked YouTube ad video: " + url);
+                return blackhole;
+            }
+        } else {
+            // Not a video playback URL, block it (likely an ad request)
+            if (debug) alert("Blocked YouTube ad domain: " + host);
+            return blackhole;
+        }
+    }
+    
+    // YouTube ad API endpoints and tracking paths
+    if (shExpMatch(url, "*youtube.com/api/stats*") ||
+        shExpMatch(url, "*youtube.com/pagead*") ||
+        shExpMatch(url, "*youtube.com/ptracking*") ||
+        shExpMatch(url, "*youtube.com/get_video_info*") ||
+        shExpMatch(url, "*youtube.com/get_video_ads*") ||
+        shExpMatch(url, "*youtube.com/advertiser*") ||
+        shExpMatch(url, "*youtube.com/ads*") ||
+        shExpMatch(url, "*youtube.com/gen_204*") ||
+        shExpMatch(url, "*youtube.com/error_204*") ||
+        shExpMatch(url, "*youtube.com/service_ajax*") ||
+        shExpMatch(url, "*youtube.com/youtubei/v1/player/ad_break*") ||
+        shExpMatch(url, "*youtube.com/youtubei/v1/player/atr*") ||
+        shExpMatch(url, "*youtube.com/youtubei/v1/log_event*") ||
+        shExpMatch(url, "*youtube.com/youtubei/v1/atr*") ||
+        (url.indexOf("youtube.com/watch?") !== -1 && url.indexOf("&adformat=") !== -1) ||
+        (url.indexOf("youtube.com/embed/") !== -1 && url.indexOf("&adformat=") !== -1) ||
+        (url.indexOf("youtube.com/live_chat") !== -1 && url.indexOf("&adformat=") !== -1)) {
+        
+        if (debug) alert("Blocked YouTube ad endpoint: " + url);
+        return blackhole;
+    }
+    
+    // YouTube ad server subdomains (only if YouTube/Google related)
+    if ((shExpMatch(host, "*.ads.*") || shExpMatch(host, "*.ad.*") || shExpMatch(host, "*adserver.*") || shExpMatch(host, "*adsystem.*")) &&
+        (host.indexOf("youtube") !== -1 || host.indexOf("google") !== -1 || host.indexOf("googlevideo") !== -1 || host.indexOf("doubleclick") !== -1)) {
+        
+        if (debug) alert("Blocked YouTube ad subdomain: " + host);
+        return blackhole;
     }
 
     // Ad-blocking and XSS-blocking logic
