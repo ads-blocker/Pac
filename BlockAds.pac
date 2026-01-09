@@ -268,8 +268,35 @@ function FindProxyForURL(url, host) {
         
         if (isVideoPlayback) {
             // For video playback URLs, check for ad-related parameters more thoroughly
-            // Check for both query params and in URL path
-            var adParams = ["&oad=", "oad=", "&ctier=", "ctier=", "&of=", "of=", "&adformat=", "adformat=", "&ad_type=", "ad_type=", "&ad_break=", "ad_break=", "&ad=", "&adurl=", "&adid=", "/ad_", "?ad="];
+            // Check for both query params and in URL path - EXPANDED LIST
+            var adParams = [
+                "&oad=", "oad=", "?oad=",
+                "&ctier=", "ctier=", "?ctier=",
+                "&of=", "of=", "?of=",
+                "&adformat=", "adformat=", "?adformat=",
+                "&ad_type=", "ad_type=", "?ad_type=",
+                "&ad_break=", "ad_break=", "?ad_break=",
+                "&ad=", "&adurl=", "&adid=", "?ad=",
+                "/ad_", "?ad=",
+                "&oadid=", "oadid=",
+                "&adpreroll=", "adpreroll=",
+                "&admidroll=", "admidroll=",
+                "&adpostroll=", "adpostroll=",
+                "&ad_slot=", "ad_slot=",
+                "&ad_event=", "ad_event=",
+                "&adsid=", "adsid=",
+                "&adflag=", "adflag=",
+                "&adlen=", "adlen=",
+                "&adsdata=", "adsdata=",
+                "&adparams=", "adparams=",
+                "&adsapi=", "adsapi=",
+                "&adserver=", "adserver=",
+                "&adurl=", "adurl=",
+                "&adid=", "adid=",
+                "&adver=", "adver=",
+                "&adtype=", "adtype=",
+                "&adsys=", "adsys="
+            ];
             for (var yt = 0; yt < adParams.length; yt++) {
                 if (url.indexOf(adParams[yt]) !== -1) {
                     hasAdParams = true;
@@ -277,17 +304,36 @@ function FindProxyForURL(url, host) {
                 }
             }
             
-            // Also check for ad-related patterns in hostname that indicate ads
-            // Some googlevideo.com subdomains serve ads (like r*.googlevideo.com with specific patterns)
-            if (!hasAdParams && !isAdDomain) {
-                // Check for suspicious patterns: if it's an r*.googlevideo.com videoplayback
-                // and has certain characteristics, it might be an ad
-                // But be careful - r*.googlevideo.com is also used for regular videos
-                // Only block if we have strong indicators
-                var suspiciousPattern = host.indexOf("r") === 0 && 
-                                       host.indexOf(".googlevideo.com") !== -1 && 
-                                       (url.indexOf("itag=") === -1 || url.length > 2000);
-                // Don't block based on this alone - it's too risky
+            // Check for patterns that indicate ads even without explicit params
+            // Some ads use encoded parameters or special patterns
+            if (!hasAdParams) {
+                // Check URL length - ad URLs are often longer due to ad parameters
+                // But be careful - some regular videos also have long URLs
+                // Check for multiple suspicious patterns together
+                var hasSuspiciousPattern = false;
+                
+                // Check for multiple "&" separators which might indicate ad params
+                var ampCount = 0;
+                for (var i = 0; i < url.length; i++) {
+                    if (url.charAt(i) === "&") {
+                        ampCount++;
+                    }
+                }
+                
+                // Check for specific patterns in hostname that might indicate ads
+                // r*.googlevideo.com is common for ads when combined with certain patterns
+                if (host.indexOf("r") === 0 && host.indexOf(".googlevideo.com") !== -1) {
+                    // If URL is very long and has many parameters, might be an ad
+                    // But also check if it has standard video parameters like itag, mime, etc.
+                    var hasVideoParams = url.indexOf("itag=") !== -1 || url.indexOf("mime=") !== -1 || url.indexOf("expire=") !== -1;
+                    if (ampCount > 15 && !hasVideoParams) {
+                        // Suspicious - many params but no standard video params
+                        hasSuspiciousPattern = true;
+                    }
+                }
+                
+                // Don't block based on suspicious patterns alone - too risky
+                // Only use this as additional confirmation
             }
             
             // Only block if it's confirmed to be an ad (ad domain OR has ad params)
@@ -325,7 +371,15 @@ function FindProxyForURL(url, host) {
         }
         
         // Block if URL contains ad-related parameters (in query string or path)
-        var adPlayerParams = ["adSignalsInfo", "adSlot", "adBreaks", "adTagParameters", "adFormat", "adBreak", "adSlots", "enableAds", "adsConfig", "adSystem", "adClient"];
+        // EXPANDED LIST to catch more ad patterns
+        var adPlayerParams = [
+            "adSignalsInfo", "adSlot", "adBreaks", "adTagParameters", "adFormat", 
+            "adBreak", "adSlots", "enableAds", "adsConfig", "adSystem", "adClient",
+            "adSignals", "adParams", "adRequest", "adResponse", "adData",
+            "adBlock", "adBlocker", "adDetect", "adSkip", "adTime",
+            "adDuration", "adStart", "adEnd", "adPosition", "adType",
+            "adContent", "adCreative", "adCampaign", "adId", "adUrl"
+        ];
         var hasAdParams = false;
         for (var p = 0; p < adPlayerParams.length; p++) {
             if (url.indexOf(adPlayerParams[p]) !== -1) {
@@ -377,6 +431,7 @@ function FindProxyForURL(url, host) {
     
     // YouTube ad API endpoints and tracking paths - Block aggressively
     // These endpoints are always or often ad-related
+    // EXPANDED to catch more ad patterns
     if (shExpMatch(url, "*youtube.com/api/stats*") ||
         shExpMatch(url, "*youtube.com/pagead*") ||
         shExpMatch(url, "*youtube.com/ptracking*") ||
@@ -397,12 +452,19 @@ function FindProxyForURL(url, host) {
         shExpMatch(url, "*youtubei.googleapis.com/youtubei/v1/advertising*") ||
         (host.indexOf("youtube.com") !== -1 && url.indexOf("/innertube") !== -1 && (url.indexOf("ad") !== -1 || url.indexOf("break") !== -1 || url.indexOf("atr") !== -1)) ||
         (host.indexOf("youtubei.googleapis.com") !== -1 && url.indexOf("/innertube") !== -1 && (url.indexOf("ad") !== -1 || url.indexOf("break") !== -1 || url.indexOf("atr") !== -1)) ||
-        (url.indexOf("youtube.com/watch?") !== -1 && (url.indexOf("&adformat=") !== -1 || url.indexOf("?adformat=") !== -1)) ||
-        (url.indexOf("youtube.com/embed/") !== -1 && (url.indexOf("&adformat=") !== -1 || url.indexOf("?adformat=") !== -1)) ||
-        (url.indexOf("youtube.com/live_chat") !== -1 && (url.indexOf("&adformat=") !== -1 || url.indexOf("?adformat=") !== -1)) ||
+        (url.indexOf("youtube.com/watch?") !== -1 && (url.indexOf("&adformat=") !== -1 || url.indexOf("?adformat=") !== -1 || url.indexOf("&oad=") !== -1 || url.indexOf("?oad=") !== -1)) ||
+        (url.indexOf("youtube.com/embed/") !== -1 && (url.indexOf("&adformat=") !== -1 || url.indexOf("?adformat=") !== -1 || url.indexOf("&oad=") !== -1 || url.indexOf("?oad=") !== -1)) ||
+        (url.indexOf("youtube.com/live_chat") !== -1 && (url.indexOf("&adformat=") !== -1 || url.indexOf("?adformat=") !== -1 || url.indexOf("&oad=") !== -1 || url.indexOf("?oad=") !== -1)) ||
         (host.indexOf("youtube.com") !== -1 && url.indexOf("/pagead/") !== -1) ||
         (host.indexOf("youtube.com") !== -1 && url.indexOf("/ad_") !== -1) ||
-        (host.indexOf("youtube.com") !== -1 && url.indexOf("/ads") !== -1 && url.indexOf("/adsense") === -1)) {
+        (host.indexOf("youtube.com") !== -1 && url.indexOf("/ads") !== -1 && url.indexOf("/adsense") === -1) ||
+        (host.indexOf("youtube.com") !== -1 && (url.indexOf("/advertise") !== -1 || url.indexOf("/advertising") !== -1)) ||
+        (host.indexOf("youtube.com") !== -1 && url.indexOf("/adserver") !== -1) ||
+        (host.indexOf("youtube.com") !== -1 && url.indexOf("/adbreak") !== -1) ||
+        (host.indexOf("youtube.com") !== -1 && url.indexOf("/adrequest") !== -1) ||
+        (host.indexOf("youtube.com") !== -1 && url.indexOf("/adresponse") !== -1) ||
+        (host.indexOf("youtube.com") !== -1 && url.indexOf("/adtag") !== -1) ||
+        (host.indexOf("youtube.com") !== -1 && url.indexOf("/adinfo") !== -1)) {
         
         if (debug) alert("Blocked YouTube ad endpoint: " + url);
         return blackhole;
