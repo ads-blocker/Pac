@@ -1,7 +1,18 @@
 // Ads-Blocking Proxy Auto-Configuration (PAC) File
 // Author: Gorstak
 // Modified to block URLs containing "xss" and updated blacklist
-// Hybrid version: Old proven general ad-blocking + YouTube-specific blocking for PowerShell script
+// YouTube Ad Blocking: Blocks ad requests but may not instantly skip ads
+// 
+// IMPORTANT LIMITATIONS:
+// PAC files can only block HTTP requests based on URL patterns.
+// They CANNOT:
+// - Read POST request bodies (where ad requests often live)
+// - Modify HTTP responses (where ad data is embedded in JSON)
+// - Inject JavaScript to skip ad timers
+//
+// YouTube ads embedded in Player API JSON responses will still show.
+// For 100% ad blocking, combine this PAC file with a browser extension
+// like uBlock Origin that can modify JavaScript and responses.
 
 // Configuration Variables
 var normal = "DIRECT";              // Default pass-through for non-blocked traffic
@@ -227,53 +238,293 @@ function FindProxyForURL(url, host) {
         }
     }
 
-    // ===== YouTube Ad Blocking Logic (for PowerShell script) =====
-    // Block s.youtube.com - critical ad-serving domain
-    if (host === "s.youtube.com" || shExpMatch(host, "s.*.youtube.com")) {
+    // ===== YouTube Ad Blocking Logic =====
+    // Block YouTube ad-serving subdomains immediately (these are always ads)
+    // MUST block s.youtube.com - it's a major ad-serving domain
+    if (shExpMatch(host, "*googlesyndication.com") ||
+        shExpMatch(host, "*doubleclick.net") ||
+        shExpMatch(host, "*googleadservices.com") ||
+        shExpMatch(host, "*adservice.google.*") ||
+        shExpMatch(host, "*ads.youtube.com") ||
+        host === "s.youtube.com" ||
+        shExpMatch(host, "s.*.youtube.com") ||
+        shExpMatch(host, "*.ad.*.googlevideo.com") ||
+        shExpMatch(host, "*.ads.*.googlevideo.com")) {
+        
+        // These domains are exclusively for ads - block everything
         if (debug) alert("Blocked YouTube ad domain: " + host);
         return blackhole;
     }
     
-    // Block googlevideo.com ad subdomains and ad parameters
+    
+    // Check googlevideo.com - need to differentiate between ads and regular videos
+    // IMPORTANT: Allow regular videos to load, only block confirmed ads
     if (shExpMatch(host, "*googlevideo.com")) {
-        // Check for explicit ad subdomains
-        if (host.indexOf(".ad.") !== -1 || host.indexOf(".ads.") !== -1 || 
-            shExpMatch(host, "*.ad.googlevideo.com") || shExpMatch(host, "*.ads.googlevideo.com")) {
-            if (debug) alert("Blocked YouTube ad subdomain: " + host);
-            return blackhole;
+        var isVideoPlayback = url.indexOf("/videoplayback") !== -1;
+        var hasAdParams = false;
+        var isAdDomain = false;
+        
+        // Check hostname for ad indicators - must be explicit ad subdomains
+        // Also check for common ad-serving subdomains
+        if (host.indexOf(".ad.") !== -1 || 
+            host.indexOf(".ads.") !== -1 || 
+            host.indexOf("ad-") !== -1 ||
+            host.indexOf("ads-") !== -1 ||
+            shExpMatch(host, "*.ad.googlevideo.com") ||
+            shExpMatch(host, "*.ads.googlevideo.com") ||
+            shExpMatch(host, "rr*.googlevideo.com") && url.indexOf("videoplayback") !== -1 && (url.indexOf("ctier") !== -1 || url.indexOf("oad") !== -1)) {
+            isAdDomain = true;
         }
-        // Check for ad parameters in video playback URLs
-        if (url.indexOf("/videoplayback") !== -1) {
-            var adParams = ["oad=", "ctier=", "adformat=", "ad_break=", "ad=", "adurl=", "adid="];
+        
+        if (isVideoPlayback) {
+            // For video playback URLs, check for ad-related parameters more thoroughly
+            // Check for both query params and in URL path - EXPANDED LIST
+            var adParams = [
+                "&oad=", "oad=", "?oad=",
+                "&ctier=", "ctier=", "?ctier=",
+                "&of=", "of=", "?of=",
+                "&adformat=", "adformat=", "?adformat=",
+                "&ad_type=", "ad_type=", "?ad_type=",
+                "&ad_break=", "ad_break=", "?ad_break=",
+                "&ad=", "&adurl=", "&adid=", "?ad=",
+                "/ad_", "?ad=",
+                "&oadid=", "oadid=",
+                "&adpreroll=", "adpreroll=",
+                "&admidroll=", "admidroll=",
+                "&adpostroll=", "adpostroll=",
+                "&ad_slot=", "ad_slot=",
+                "&ad_event=", "ad_event=",
+                "&adsid=", "adsid=",
+                "&adflag=", "adflag=",
+                "&adlen=", "adlen=",
+                "&adsdata=", "adsdata=",
+                "&adparams=", "adparams=",
+                "&adsapi=", "adsapi=",
+                "&adserver=", "adserver=",
+                "&adurl=", "adurl=",
+                "&adid=", "adid=",
+                "&adver=", "adver=",
+                "&adtype=", "adtype=",
+                "&adsys=", "adsys="
+            ];
             for (var yt = 0; yt < adParams.length; yt++) {
                 if (url.indexOf(adParams[yt]) !== -1) {
-                    if (debug) alert("Blocked YouTube ad video: " + url);
+                    hasAdParams = true;
+                    break;
+                }
+            }
+            
+            // Check for patterns that indicate ads even without explicit params
+            // Some ads use encoded parameters or special patterns
+            if (!hasAdParams) {
+                // Check URL length - ad URLs are often longer due to ad parameters
+                // But be careful - some regular videos also have long URLs
+                // Check for multiple suspicious patterns together
+                var hasSuspiciousPattern = false;
+                
+                // Check for multiple "&" separators which might indicate ad params
+                var ampCount = 0;
+                for (var i = 0; i < url.length; i++) {
+                    if (url.charAt(i) === "&") {
+                        ampCount++;
+                    }
+                }
+                
+                // Check for specific patterns in hostname that might indicate ads
+                // r*.googlevideo.com is common for ads when combined with certain patterns
+                if (host.indexOf("r") === 0 && host.indexOf(".googlevideo.com") !== -1) {
+                    // If URL is very long and has many parameters, might be an ad
+                    // But also check if it has standard video parameters like itag, mime, etc.
+                    var hasVideoParams = url.indexOf("itag=") !== -1 || url.indexOf("mime=") !== -1 || url.indexOf("expire=") !== -1;
+                    if (ampCount > 15 && !hasVideoParams) {
+                        // Suspicious - many params but no standard video params
+                        hasSuspiciousPattern = true;
+                    }
+                }
+                
+                // Don't block based on suspicious patterns alone - too risky
+                // Only use this as additional confirmation
+            }
+            
+            // Only block if it's confirmed to be an ad (ad domain OR has ad params)
+            if (isAdDomain || hasAdParams) {
+                if (debug) alert("Blocked YouTube ad video: " + url);
+                return blackhole;
+            }
+            // Regular video playback - ALLOW through
+            return normal;
+        } else {
+            // Non-videoplayback URLs on googlevideo.com
+            // Allow most requests, only block if explicitly ad-related
+            if (isAdDomain) {
+                // Confirmed ad subdomain - block
+                if (debug) alert("Blocked YouTube ad subdomain: " + host);
+                return blackhole;
+            }
+            // Allow other googlevideo.com requests (might be video metadata, thumbnails, etc.)
+            // Don't block these as they're needed for video loading
+            return normal;
+        }
+    }
+    
+    // YouTube Player API - Block only when requesting ad data
+    // Be careful not to block regular player API calls needed for video playback
+    if (url.indexOf("/youtubei/v1/player") !== -1 || url.indexOf("/innertube") !== -1) {
+        // First, check if URL explicitly contains ad-related parameters in the path
+        var adPlayerPaths = ["/ad_break", "/atr", "/advertising", "/ad-break", "ad_break", "ad_break/"];
+        var isAdPath = false;
+        for (var ap = 0; ap < adPlayerPaths.length; ap++) {
+            if (url.indexOf(adPlayerPaths[ap]) !== -1) {
+                isAdPath = true;
+                break;
+            }
+        }
+        
+        // Block if URL contains ad-related parameters (in query string or path)
+        // EXPANDED LIST to catch more ad patterns
+        var adPlayerParams = [
+            "adSignalsInfo", "adSlot", "adBreaks", "adTagParameters", "adFormat", 
+            "adBreak", "adSlots", "enableAds", "adsConfig", "adSystem", "adClient",
+            "adSignals", "adParams", "adRequest", "adResponse", "adData",
+            "adBlock", "adBlocker", "adDetect", "adSkip", "adTime",
+            "adDuration", "adStart", "adEnd", "adPosition", "adType",
+            "adContent", "adCreative", "adCampaign", "adId", "adUrl"
+        ];
+        var hasAdParams = false;
+        for (var p = 0; p < adPlayerParams.length; p++) {
+            if (url.indexOf(adPlayerParams[p]) !== -1) {
+                hasAdParams = true;
+                break;
+            }
+        }
+        
+        if (isAdPath || hasAdParams) {
+            if (debug) alert("Blocked YouTube player API with ad params: " + url);
+            return blackhole;
+        }
+        
+        // Block player API on confirmed ad-related subdomains only
+        // CRITICAL: s.youtube.com is always ads - block all requests
+        if (host === "s.youtube.com" || 
+            host.indexOf("s.youtube.com") !== -1 ||
+            host.indexOf(".ad.") !== -1 || 
+            host.indexOf(".ads.") !== -1 ||
+            host.indexOf("ads.youtube.com") !== -1) {
+            if (debug) alert("Blocked YouTube player API on ad domain: " + host);
+            return blackhole;
+        }
+        
+        // For youtubei.googleapis.com and www.youtube.com, be more aggressive
+        // Block player API calls that might be ad-related (even if we can't see POST body)
+        // We can't read POST bodies, so we need to block more conservatively
+        // But if the URL shows any ad indicators, block it
+        if (host.indexOf("youtubei.googleapis.com") !== -1 || host.indexOf("youtube.com") !== -1) {
+            // Block if the path explicitly indicates ads
+            if (isAdPath || hasAdParams || url.indexOf("/advertising") !== -1) {
+                if (debug) alert("Blocked YouTube API ad endpoint: " + url);
+                return blackhole;
+            }
+            
+            // Additional aggressive check: Block player API if URL contains patterns that suggest ads
+            // Even though we can't see POST body, we can block based on URL patterns
+            var suspiciousAdPatterns = ["break", "atr", "ad_", "advertising", "adbreak"];
+            var urlLower = url.toLowerCase();
+            for (var sap = 0; sap < suspiciousAdPatterns.length; sap++) {
+                if (urlLower.indexOf(suspiciousAdPatterns[sap]) !== -1 && 
+                    (url.indexOf("/youtubei/v1/player") !== -1 || url.indexOf("/innertube") !== -1)) {
+                    if (debug) alert("Blocked suspicious YouTube API pattern: " + url);
                     return blackhole;
                 }
             }
+            
+            // For player API on www.youtube.com, check if it's likely an ad request
+            // (This is tricky because we can't see POST body, but we can check patterns)
+            if (host.indexOf("www.youtube.com") !== -1 && url.indexOf("/youtubei/v1/player") !== -1) {
+                // Allow it through - regular player API calls are needed
+                // Note: Some ads embedded in responses will still get through (PAC file limitation)
+                return normal;
+            }
+            // Allow regular player API calls through
+            return normal;
         }
-        // Allow regular videos through
+        
+        // Allow other player API calls (needed for regular video playback)
         return normal;
     }
     
-    // Block YouTube API ad endpoints
-    if ((url.indexOf("/youtubei/v1/player") !== -1 || url.indexOf("/innertube") !== -1) &&
-        (url.indexOf("ad") !== -1 || url.indexOf("break") !== -1 || url.indexOf("atr") !== -1)) {
-        if (debug) alert("Blocked YouTube API ad: " + url);
-        return blackhole;
-    }
-    
-    // Block YouTube-specific ad endpoints
-    if (host.indexOf("youtube.com") !== -1 &&
-        (url.indexOf("/pagead") !== -1 || url.indexOf("/ptracking") !== -1 || 
-         url.indexOf("/gen_204") !== -1 || url.indexOf("/ad_") !== -1 ||
-         url.indexOf("/ads") !== -1 || url.indexOf("/advertise") !== -1)) {
+    // YouTube ad API endpoints and tracking paths - Block aggressively
+    // These endpoints are always or often ad-related
+    // EXPANDED to catch more ad patterns
+    if (shExpMatch(url, "*youtube.com/api/stats*") ||
+        shExpMatch(url, "*youtube.com/pagead*") ||
+        shExpMatch(url, "*youtube.com/ptracking*") ||
+        shExpMatch(url, "*youtube.com/get_video_info*") ||
+        shExpMatch(url, "*youtube.com/get_video_ads*") ||
+        shExpMatch(url, "*youtube.com/advertiser*") ||
+        shExpMatch(url, "*youtube.com/ads*") ||
+        shExpMatch(url, "*youtube.com/gen_204*") ||
+        shExpMatch(url, "*youtube.com/error_204*") ||
+        shExpMatch(url, "*youtube.com/service_ajax*") ||
+        shExpMatch(url, "*youtube.com/youtubei/v1/player/ad_break*") ||
+        shExpMatch(url, "*youtube.com/youtubei/v1/player/atr*") ||
+        shExpMatch(url, "*youtube.com/youtubei/v1/log_event*") ||
+        shExpMatch(url, "*youtube.com/youtubei/v1/atr*") ||
+        shExpMatch(url, "*youtubei.googleapis.com/youtubei/v1/player/ad_break*") ||
+        shExpMatch(url, "*youtubei.googleapis.com/youtubei/v1/player/atr*") ||
+        shExpMatch(url, "*youtube.com/youtubei/v1/advertising*") ||
+        shExpMatch(url, "*youtubei.googleapis.com/youtubei/v1/advertising*") ||
+        (host.indexOf("youtube.com") !== -1 && url.indexOf("/innertube") !== -1 && (url.indexOf("ad") !== -1 || url.indexOf("break") !== -1 || url.indexOf("atr") !== -1)) ||
+        (host.indexOf("youtubei.googleapis.com") !== -1 && url.indexOf("/innertube") !== -1 && (url.indexOf("ad") !== -1 || url.indexOf("break") !== -1 || url.indexOf("atr") !== -1)) ||
+        (url.indexOf("youtube.com/watch?") !== -1 && (url.indexOf("&adformat=") !== -1 || url.indexOf("?adformat=") !== -1 || url.indexOf("&oad=") !== -1 || url.indexOf("?oad=") !== -1)) ||
+        (url.indexOf("youtube.com/embed/") !== -1 && (url.indexOf("&adformat=") !== -1 || url.indexOf("?adformat=") !== -1 || url.indexOf("&oad=") !== -1 || url.indexOf("?oad=") !== -1)) ||
+        (url.indexOf("youtube.com/live_chat") !== -1 && (url.indexOf("&adformat=") !== -1 || url.indexOf("?adformat=") !== -1 || url.indexOf("&oad=") !== -1 || url.indexOf("?oad=") !== -1)) ||
+        (host.indexOf("youtube.com") !== -1 && url.indexOf("/pagead/") !== -1) ||
+        (host.indexOf("youtube.com") !== -1 && url.indexOf("/ad_") !== -1) ||
+        (host.indexOf("youtube.com") !== -1 && url.indexOf("/ads") !== -1 && url.indexOf("/adsense") === -1) ||
+        (host.indexOf("youtube.com") !== -1 && (url.indexOf("/advertise") !== -1 || url.indexOf("/advertising") !== -1)) ||
+        (host.indexOf("youtube.com") !== -1 && url.indexOf("/adserver") !== -1) ||
+        (host.indexOf("youtube.com") !== -1 && url.indexOf("/adbreak") !== -1) ||
+        (host.indexOf("youtube.com") !== -1 && url.indexOf("/adrequest") !== -1) ||
+        (host.indexOf("youtube.com") !== -1 && url.indexOf("/adresponse") !== -1) ||
+        (host.indexOf("youtube.com") !== -1 && url.indexOf("/adtag") !== -1) ||
+        (host.indexOf("youtube.com") !== -1 && url.indexOf("/adinfo") !== -1)) {
+        
         if (debug) alert("Blocked YouTube ad endpoint: " + url);
         return blackhole;
     }
+    
+    // Block YouTube tracking/analytics endpoints that serve ads
+    // These are critical - block all tracking endpoints that might serve ads
+    if (shExpMatch(host, "*video-stats.l.google.com") ||
+        shExpMatch(host, "*s.youtube.com") ||
+        host === "s.youtube.com" ||
+        (host.indexOf("youtube.com") !== -1 && (url.indexOf("/ptracking") !== -1 || url.indexOf("/pagead") !== -1 || url.indexOf("/gen_204") !== -1 || url.indexOf("/error_204") !== -1)) ||
+        (host.indexOf("youtube.com") !== -1 && url.indexOf("/log_event") !== -1) ||
+        (host.indexOf("google.com") !== -1 && url.indexOf("/pagead") !== -1) ||
+        (host.indexOf("google.com") !== -1 && url.indexOf("/ptracking") !== -1)) {
+        
+        if (debug) alert("Blocked YouTube ad tracking: " + url);
+        return blackhole;
+    }
+    
+    // Block YouTube API endpoints on ad-related domains
+    if ((host.indexOf("youtubei.googleapis.com") !== -1 || host.indexOf("googleapis.com") !== -1) &&
+        (url.indexOf("/youtubei/v1/") !== -1) &&
+        (url.indexOf("ad") !== -1 || url.indexOf("atr") !== -1 || url.indexOf("break") !== -1)) {
+        
+        if (debug) alert("Blocked YouTube API ad endpoint: " + url);
+        return blackhole;
+    }
+    
+    // YouTube ad server subdomains (only if YouTube/Google related)
+    if ((shExpMatch(host, "*.ads.*") || shExpMatch(host, "*.ad.*") || shExpMatch(host, "*adserver.*") || shExpMatch(host, "*adsystem.*")) &&
+        (host.indexOf("youtube") !== -1 || host.indexOf("google") !== -1 || host.indexOf("googlevideo") !== -1 || host.indexOf("doubleclick") !== -1)) {
+        
+        if (debug) alert("Blocked YouTube ad subdomain: " + host);
+        return blackhole;
+    }
 
-    // ===== GENERAL AD-BLOCKING LOGIC (proven from old version) =====
-    // Ad-blocking and XSS-blocking logic - this catches all other ads
+    // Ad-blocking and XSS-blocking logic
     if (
         // Match ad-related domains
         adDomainRegex.test(host) ||
