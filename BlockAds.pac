@@ -524,20 +524,50 @@ function FindProxyForURL(url, host) {
         return blackhole;
     }
 
-    // Ad-blocking and XSS-blocking logic
-    if (
-        // Match ad-related domains
-        adDomainRegex.test(host) ||
-        // Match ad-related URL patterns or URLs containing "xss"
-        adUrlRegex.test(url) ||
-        // Match common ad subdomains
-        adSubdomainRegex.test(host) ||
-        // Match web bugs and Flash ads
-        adWebBugRegex.test(url) ||
-        // Match explicitly blacklisted domains
-        blacklist.indexOf(host) !== -1
-    ) {
-        if (debug) alert("Blocked...\nURL: " + url + "\nHost: " + host);
+    // ===== GENERAL AD-BLOCKING LOGIC (for non-YouTube ads) =====
+    // This catches all other ads on the web
+    
+    // First check: Explicitly blacklisted domains (highest priority)
+    if (blacklist.indexOf(host) !== -1) {
+        if (debug) alert("Blocked blacklisted domain: " + host);
+        return blackhole;
+    }
+    
+    // Second check: Ad-related domain patterns (regex matching)
+    if (adDomainRegex.test(host)) {
+        if (debug) alert("Blocked ad domain pattern: " + host);
+        return blackhole;
+    }
+    
+    // Third check: Ad-related URL patterns (includes xss blocking)
+    if (adUrlRegex.test(url)) {
+        if (debug) alert("Blocked ad URL pattern: " + url);
+        return blackhole;
+    }
+    
+    // Fourth check: Common ad subdomain patterns
+    if (adSubdomainRegex.test(host)) {
+        if (debug) alert("Blocked ad subdomain pattern: " + host);
+        return blackhole;
+    }
+    
+    // Fifth check: Web bugs and Flash ads
+    if (adWebBugRegex.test(url)) {
+        if (debug) alert("Blocked web bug/flash ad: " + url);
+        return blackhole;
+    }
+    
+    // Sixth check: Generic ad subdomain patterns (catch-all for remaining ad domains)
+    // This catches patterns like *.ad.*, *.ads.*, *.adserver.*, etc. for ALL domains
+    if (shExpMatch(host, "*.ads.*") || 
+        shExpMatch(host, "*.ad.*") || 
+        shExpMatch(host, "*adserver.*") || 
+        shExpMatch(host, "*adsystem.*") ||
+        shExpMatch(host, "*adservice.*") ||
+        shExpMatch(host, "*adnetwork.*") ||
+        shExpMatch(host, "*advertising.*") ||
+        shExpMatch(host, "*advertise.*")) {
+        if (debug) alert("Blocked generic ad subdomain: " + host);
         return blackhole;
     }
 
