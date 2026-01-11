@@ -1,11 +1,10 @@
 // Ads-Blocking Proxy Auto-Configuration (PAC) File
 // Author: Gorstak
 // Modified to block URLs containing "xss" and updated blacklist
-// Hybrid version: Old proven general ad-blocking + YouTube-specific blocking for PowerShell script
 
 // Configuration Variables
 var normal = "DIRECT";              // Default pass-through for non-blocked traffic
-var blackhole = "PROXY 127.0.0.1:0"; // Blackhole proxy for blocked traffic (non-existent proxy)
+var blackhole = "PROXY 127.0.0.1:3421"; // Blackhole proxy for blocked traffic
 var isEnabled = 1;                  // Toggle for enabling/disabling ad-blocking (1 = enabled)
 var debug = 0;                      // Debugging flag (1 = enabled)
 
@@ -227,53 +226,7 @@ function FindProxyForURL(url, host) {
         }
     }
 
-    // ===== YouTube Ad Blocking Logic (for PowerShell script) =====
-    // Block s.youtube.com - critical ad-serving domain
-    if (host === "s.youtube.com" || shExpMatch(host, "s.*.youtube.com")) {
-        if (debug) alert("Blocked YouTube ad domain: " + host);
-        return blackhole;
-    }
-    
-    // Block googlevideo.com ad subdomains and ad parameters
-    if (shExpMatch(host, "*googlevideo.com")) {
-        // Check for explicit ad subdomains
-        if (host.indexOf(".ad.") !== -1 || host.indexOf(".ads.") !== -1 || 
-            shExpMatch(host, "*.ad.googlevideo.com") || shExpMatch(host, "*.ads.googlevideo.com")) {
-            if (debug) alert("Blocked YouTube ad subdomain: " + host);
-            return blackhole;
-        }
-        // Check for ad parameters in video playback URLs
-        if (url.indexOf("/videoplayback") !== -1) {
-            var adParams = ["oad=", "ctier=", "adformat=", "ad_break=", "ad=", "adurl=", "adid="];
-            for (var yt = 0; yt < adParams.length; yt++) {
-                if (url.indexOf(adParams[yt]) !== -1) {
-                    if (debug) alert("Blocked YouTube ad video: " + url);
-                    return blackhole;
-                }
-            }
-        }
-        // Allow regular videos through
-        return normal;
-    }
-    
-    // Block YouTube API ad endpoints
-    if ((url.indexOf("/youtubei/v1/player") !== -1 || url.indexOf("/innertube") !== -1) &&
-        (url.indexOf("ad") !== -1 || url.indexOf("break") !== -1 || url.indexOf("atr") !== -1)) {
-        if (debug) alert("Blocked YouTube API ad: " + url);
-        return blackhole;
-    }
-    
-    // Block YouTube-specific ad endpoints
-    if (host.indexOf("youtube.com") !== -1 &&
-        (url.indexOf("/pagead") !== -1 || url.indexOf("/ptracking") !== -1 || 
-         url.indexOf("/gen_204") !== -1 || url.indexOf("/ad_") !== -1 ||
-         url.indexOf("/ads") !== -1 || url.indexOf("/advertise") !== -1)) {
-        if (debug) alert("Blocked YouTube ad endpoint: " + url);
-        return blackhole;
-    }
-
-    // ===== GENERAL AD-BLOCKING LOGIC (proven from old version) =====
-    // Ad-blocking and XSS-blocking logic - this catches all other ads
+    // Ad-blocking and XSS-blocking logic
     if (
         // Match ad-related domains
         adDomainRegex.test(host) ||
